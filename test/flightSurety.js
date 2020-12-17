@@ -1,15 +1,20 @@
 
 var Test = require('../config/testConfig.js');
-
+// var BigNumber = require('bignumber.js');
 var Web3 = require('web3');
+// const web3 = new Web3(ganache.provider());
+
+const faker = require('faker');
+
 
 
 contract('Flight Surety Tests', async (accounts) => {
 
   const oracles_test_no = 20;
-  const late_status_no = 20;
   var config;
-  var flightTimestamp;
+  var flightTimestamp;  
+  const airline5 = accounts[0];
+  
 
   before('setup contract', async () => {
     config = await Test.Config(accounts);
@@ -92,43 +97,6 @@ contract('Flight Surety Tests', async (accounts) => {
     assert.equal(airlinesCount, 1, "Airlines count to be after deploy.");
   });
 
-  it('(airline) cannot register if it is not funded', async () => {
-    
-    // ARRANGE
-    let newAirline = accounts[2];
-
-    // ACT
-    try {
-        await config.flightSuretyData.registerAirline(newAirline, {from: config.firstAirline});
-    }
-    catch(e) {
-
-    }
-    let result = await config.flightSuretyData.isAirline.call(newAirline); 
-
-    // ASSERT
-    assert.equal(result, false, "Airline should not be able to register another airline if it hasn't provided funding");
-  });
-
-  it("(airline) needs 50% votes to register an Airline using registerAirline() once there are 4 or more airlines registered", async () => {
-
-    // ACT
-    try {
-        await config.flightSuretyApp.registerAirline(accounts[2], "Srilankan", {from: accounts[0]});
-        await config.flightSuretyApp.registerAirline(accounts[3], "Malaysian", {from: accounts[0]});
-        await config.flightSuretyApp.registerAirline(accounts[4], "Deccanair", {from: accounts[0]});
-    }
-    catch(e) {
-      console.log(e);
-    }
-    let result = await config.flightSuretyData.isAirline.call(accounts[4]);
-    let airlinesCount = await config.flightSuretyData.airlinesCount.call(); 
-
-    // ASSERT
-    assert.equal(result, false, "Airline should not be able to register another airline if it hasn't provided funding");
-    assert.equal(airlinesCount, 4, "Airlines to be one after deploy.");
-  });
-
   it('airline can register a flight using registerFlight()', async () => {
     // ARRANGE
     flightTimestamp = Math.floor(Date.now() / 1000); 
@@ -170,54 +138,39 @@ contract('Flight Surety Tests', async (accounts) => {
     }
   });
 
-  it("Server will loop through all registered oracles, identify those oracles for which the OracleRequest event applies, and respond by calling into FlightSuretyApp contract with random status code", async () => {
+
+  it('(airline) fifth airline (registered) cannot participate when unfunded ', async () => {
     // ARRANGE
-    let flight = 'CODE123'; 
-    let timestamp = Math.floor(Date.now() / 1000); 
 
-    
-    await config.flightSuretyApp.fetchFlightStatus(config.firstAirline, flight, timestamp);
+    const airline7 = accounts[7];
+    let reverted = false;
 
-    for(let a=20; a < (oracles_test_no+20); a++) {
-      let oracleIndexes = await config.flightSuretyApp.getMyIndexes({from: accounts[a]});
-      for(let idx=0;idx<3;idx++) {
-        try {
-          
-          await config.flightSuretyApp.submitOracleResponse(oracleIndexes[idx], config.firstAirline, flight, timestamp, late_status_no, { from: accounts[a] });
-        } catch(e) {
-          
-          // console.log('\nError', idx, oracleIndexes[idx].toNumber(), flight, flightTimestamp);
-        }
-      }
+    // ACT
+    try {
+        await config.flightSuretyApp.registerAirline(airline7, faker.company.name(), {from: airline5, gas: 200000});
+    } catch (e) {
+        reverted = true;
     }
-    let flightStatus = await config.flightSuretyApp.viewFlightStatus(flight, config.firstAirline);
-    assert.equal(late_status_no, flightStatus.toString(), 'Oracles should changed flight status to 20 (late due to Airline)');
-  });
 
-  it("(passenger) receives credit of 1.5X the amount they paid, if flight is delayed due to airline fault", async () => {
+    // ASSERT
+    assert.equal(reverted, true, "A registered airplane cannot participate when unfunded");
+});
+
+  it('(airline) cannot register an Airline using registerAirline() if it is not funded', async () => {
     // ARRANGE
-    let price = await config.flightSuretyData.insurance_limit.call();
-    let creditToPay = await config.flightSuretyData.getCreditToPay.call({from: config.firstPassenger}); 
-    const creditInWei = price *1.5;
-    assert.equal(creditToPay, creditInWei, "Passenger should have 1.5 ether to withdraw.");
-  });
-  
-  it("(passenger) can withdraw any funds owed to them as a result of receiving credit for insurance payout", async () => {
-    let creditToPay = await config.flightSuretyData.getCreditToPay.call({from: config.firstPassenger});
+    let newAirline = accounts[1];
+    let reverted = false;
+    // ACT
+    try {
+        await config.flightSuretyApp.registerAirline(newAirline, faker.company.name(), {from: config.firstAirline});
+    } catch (e) {
+        reverted = true;
+    }
+    let result = await config.flightSuretyData.isAirline.call(newAirline);
 
-    let passengerOriginalBalance = await web3.eth.getBalance(config.firstPassenger);
-    let receipt = await config.flightSuretyData.pay({from: config.firstPassenger});
-    let passengerFinalBalance = await web3.eth.getBalance(config.firstPassenger);
-
-    
-    const gasUsed = Number(receipt.receipt.gasUsed);
-    const tx = await web3.eth.getTransaction(receipt.tx);
-    const gasPrice = Number(tx.gasPrice);
-    
-    let finalCredit = await config.flightSuretyData.getCreditToPay.call({from: config.firstPassenger});
-    
-    assert.equal(finalCredit.toString(), 0, "Passenger funds have been transferred to wallet.");
-    assert.equal(Number(passengerOriginalBalance) + Number(creditToPay) - (gasPrice * gasUsed), Number(passengerFinalBalance), "Passengers balance should have increased the amount it had credited");
+    // ASSERT
+    assert.equal(reverted, true, "Transaction should revert if unfunded airline attempts a registration");
+    assert.equal(result, false, "Airline should not be registered by another airline that is unfunded");
   });
 
 });
